@@ -29,18 +29,22 @@ TARGETS_FILE = "targets.json"
 client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 def load_targets():
-    """Load targets from JSON file, falling back to config.py if not exists."""
+    """Load targets from JSON file and merge with .env config."""
+    json_targets = []
     if os.path.exists(TARGETS_FILE):
         try:
             with open(TARGETS_FILE, 'r') as f:
-                return json.load(f)
+                json_targets = json.load(f)
         except Exception as e:
             log(f"Error loading targets file: {e}")
     
-    # Fallback to env config and save it
-    initial_targets = config.TARGET_USERS
-    save_targets(initial_targets)
-    return initial_targets
+    # Merge env config with JSON targets (Union)
+    env_targets = config.TARGET_USERS
+    merged_targets = list(set(json_targets + env_targets))
+    
+    # Save back to ensure sync
+    save_targets(merged_targets)
+    return merged_targets
 
 def save_targets(targets):
     """Save target list to JSON file."""
@@ -353,7 +357,8 @@ def _run_bot_logic(live_ctx):
                     "status": f"{status_icon} {log_status}"
                 })
 
-                log(f"Thread: {thread.thread_title} [{participants_str}] | Last: {sender_username}: '{message_text[:20]}...' | {status_icon} {log_status}")
+                if not BOT_UI.use_tui:
+                    log(f"Thread: {thread.thread_title} [{participants_str}] | Last: {sender_username}: '{message_text[:20]}...' | {status_icon} {log_status}")
 
                 # Admin Check
                 is_admin_sender = False

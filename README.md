@@ -62,9 +62,11 @@ A production-grade, 24/7 Instagram DM Automation Bot that acts as a sarcastic, w
 
     # Who to reply to (Comma Separated USERNAMES)
     TARGET_USERS=friend1,friend2,crush_account
-
-    # Google Gemini API Key
-    GEMINI_API_KEY=AIz...
+    
+    # Note: 
+    # 1. This list is the "Source of Truth". On every restart, these users are ensured to be in the target list.
+    # 2. You can dynamically add more users via `!add` command, which are saved to `targets.json`.
+    # 3. The bot loads the union of .env + targets.json on startup.
     ```
     *   **Note:** Use **Usernames** (handles), NOT Display Names.
 
