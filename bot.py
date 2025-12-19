@@ -113,11 +113,20 @@ class BotTUI:
         save_mode(mode) # Optional: persist mode if desired, or just keep runtime
 
     def generate_layout(self):
+        # Footer
+        targets_list = self.targets
+        targets_str = ", ".join(targets_list)
+        footer_text = f"Targets: {targets_str} | !polite, !joke, !normal, !add/remove | [Ctrl+C to Stop]"
+        
+        available_width = max(10, self.console.width - 4)
+        required_lines = math.ceil(len(footer_text) / available_width)
+        footer_height = required_lines + 2
+
         layout = Layout()
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main", ratio=1),
-            Layout(name="footer", size=3) # Will be dynamic
+            Layout(name="footer", size=footer_height)
         )
         layout["main"].split_row(
             Layout(name="left", ratio=1),
@@ -130,32 +139,34 @@ class BotTUI:
         header_text = f"🤖 Instagram Bot | User: {self.user_id} | Mode: {self.mode.upper()} {mode_icon} | Status: [{status_color}]{self.status_msg}[/{status_color}]"
         layout["header"].update(Panel(header_text, style="bold white on blue"))
         
-        # Logs (Right)
-        log_text = "\n".join(self.logs)
+        # Determine items to show based on height
+        # Total Height - Header(3) - Footer(footer_height) - PanelBorders(2) - split lines(2)
+        # Approximate: Height - footer_height - 6
+        available_height = max(5, self.console.height - footer_height - 6)
+
+        # Logs (Right) - Last N items that fit
+        log_text = "\n".join(self.logs[-available_height:])
         layout["right"].update(Panel(log_text, title="📜 Recent Logs", border_style="cyan"))
         
         # Threads (Left)
-        table = Table(show_header=True, header_style="bold magenta")
+        table = Table(show_header=True, header_style="bold magenta", expand=True)
         table.add_column("Thread", style="dim", width=20)
         table.add_column("Last Msg", width=30)
         table.add_column("Status", justify="right")
         
-        for t in self.recent_threads[:15]: # Show top 15
+        # Table rows need to fit available height. Each row is approx 1 line + header (2 lines)
+        table_rows = max(1, available_height - 3)
+        for t in self.recent_threads[:table_rows]: 
             table.add_row(t['title'], t['msg'], t['status'])
             
         layout["left"].update(Panel(table, title="💬 Recent Threads", border_style="green"))
-        
-        # Footer
-        targets_list = self.targets
-        targets_str = ", ".join(targets_list)
-        footer_text = f"Targets: {targets_str} | !polite, !joke, !normal, !add/remove | [Ctrl+C to Stop]"
-        
-        available_width = max(10, self.console.width - 4)
-        required_lines = math.ceil(len(footer_text) / available_width)
-        layout["footer"].size = required_lines + 2
+
+        # Footer Update
         layout["footer"].update(Panel(footer_text, style="white on black"))
         
         return layout
+        
+
 
 # Global instance
 BOT_UI = None
@@ -209,18 +220,29 @@ def generate_response(prompt_input):
     
     current_mode = BOT_UI.mode if BOT_UI else "default"
     
+    # Common Instruction for ALL modes
+    language_instruction = (
+        "IMPORTANT: You must reply in the SAME LANGUAGE that the user uses. "
+        "If the user speaks Thai, reply in Thai. "
+        "If the user speaks English, reply in English. "
+        "If unsure or mixed, DEFAULT TO THAI. "
+    )
+    
     if current_mode == "polite":
         persona_instruction = (
-            "You are a polite, respectful, and helpful Thai assistant. "
-            "Use formal/polite language (end with ครับ/ค่ะ when appropriate). "
+            f"{language_instruction}"
+            "You are a polite, respectful, and helpful assistant. "
+            "Use formal/polite language (end with ครับ/ค่ะ when appropriate for Thai). "
             "Be kind and avoid slang or rude words. "
             "Keep the response VERY SHORT, NOT EXCEEDING 1 SENTENCE. "
         )
     elif current_mode == "joke":
         # Specific instruction: Funny but NOT insulating/rude
         persona_instruction = (
-            "You are a funny, cheerful Thai friend who loves telling jokes. "
+            f"{language_instruction}"
+            "You are a funny, cheerful friend who loves telling jokes. "
             "Make a joke or say something funny based on the input. "
+            "If the user speaks Thai, tell a Thai joke (Mook-Seaw or pun). "
             "IMPORTANT: Be lighthearted and playful. "
             "Do NOT be sarcastic, rude, insulting, or aggressive. "
             "Do NOT use profanity. "
@@ -228,6 +250,7 @@ def generate_response(prompt_input):
         )
     else: # Default (Kwan-teen)
         persona_instruction = (
+            f"{language_instruction}"
             "You are a creative, sarcastic, and 'kwan-teen' (กวนตีน) Thai friend. "
             "Use Thai slang, be witty, and avoid repetitive answers. "
             "Keep the response VERY SHORT, NOT EXCEEDING 1 SENTENCE. "
