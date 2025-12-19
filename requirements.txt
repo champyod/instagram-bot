@@ -1,0 +1,4 @@
+instagrapi
+google-genai
+python-dotenv
+schedule
