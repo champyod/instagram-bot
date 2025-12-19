@@ -99,11 +99,28 @@ def run_bot():
     my_pk = str(cl.user_id)
     log(f"Bot started. User ID: {my_pk}")
     log(f"Target Users (Must verify these are USERNAMES not display names): {config.TARGET_USERS}")
+    log("Admin Commands: !stop (pause), !start (resume), !ignore n (pause n mins), !kill (exit)")
+
+    # Bot run state
+    is_paused = False
+    ignore_until = None
 
     while True:
         try:
+            # Check ignore timer
+            if ignore_until and datetime.now() > ignore_until:
+                log("⏳ Ignore timer expired. Resuming bot...")
+                ignore_until = None
+                is_paused = False
+
             # Polling interval set to 10 seconds as requested
             poll_interval = 10
+            if is_paused:
+                status_msg = "⛔ PAUSED"
+                if ignore_until:
+                    remaining = (ignore_until - datetime.now()).total_seconds() / 60
+                    status_msg += f" (Resuming in {remaining:.1f} mins)"
+                log(f"Status: {status_msg} - Waiting for !start or !kill...")
             
             # --- Check Direct Threads ---
             threads = cl.direct_threads(amount=20)
@@ -137,7 +154,7 @@ def run_bot():
                 status_icon = "✅ Read" if is_from_me else "📩 UNREAD"
                 log(f"Thread: {thread.thread_title} [{participants_str}] | Last: {sender_username}: '{message_text[:20]}...' | {status_icon}")
 
-                # Check for Kill Switch from Admin
+                # Check for Admin Commands
                 # Workaround: find admin PK from thread users to avoid buggy user_id_from_username call
                 is_admin_sender = False
                 for user in thread.users:
@@ -145,10 +162,44 @@ def run_bot():
                         is_admin_sender = True
                         break
                 
-                if is_admin_sender:
-                    if last_msg.item_type == 'text' and last_msg.text.strip() == "!stop":
-                        log("🛑 Kill switch activated by Admin. Terminating...")
+                if is_admin_sender and last_msg.item_type == 'text':
+                    cmd = last_msg.text.strip().lower()
+                    
+                    if cmd == "!kill":
+                        log("🛑 Kill switch (!kill) activated by Admin. Terminating process...")
                         sys.exit(0)
+                    
+                    elif cmd == "!stop":
+                        if not is_paused:
+                            log("⏸️ Admin sent !stop. Bot PAUSED.")
+                            is_paused = True
+                            ignore_until = None
+                            # Reply to admin to confirm
+                            cl.direct_send("Bot Paused ⏸️", thread_ids=[thread.pk])
+
+                    elif cmd == "!start":
+                        if is_paused:
+                            log("▶️ Admin sent !start. Bot RESUMED.")
+                            is_paused = False
+                            ignore_until = None
+                            cl.direct_send("Bot Resumed ▶️", thread_ids=[thread.pk])
+
+                    elif cmd.startswith("!ignore"):
+                        try:
+                            parts = cmd.split()
+                            if len(parts) > 1:
+                                mins = float(parts[1])
+                                from datetime import timedelta # Import inside loop or top level, ensuring it's available
+                                ignore_until = datetime.now() + timedelta(minutes=mins)
+                                is_paused = True
+                                log(f"⏳ Admin sent !ignore {mins}. Pausing for {mins} minutes.")
+                                cl.direct_send(f"Sleeping for {mins} mins ⏳", thread_ids=[thread.pk])
+                        except ValueError:
+                            log("⚠️ Invalid !ignore format. Use: !ignore 5")
+
+                # If paused, skip processing targets
+                if is_paused:
+                    continue
 
                 # Check if the thread involves one of our targets
                 is_target = False
@@ -173,9 +224,8 @@ def run_bot():
                         # Reduced delay to 1-5 seconds as requested
                         human_like_delay(1, 5)
                         
-                        # 2. Geneate Response
+                        # 2. Generate Response
                         response_text = generate_response(message_text)
-                        log(f"Generated response: {response_text}")
                         
                         # 3. Typing Simulation
                         typing_simulation_delay(len(response_text))
