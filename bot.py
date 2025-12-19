@@ -108,24 +108,16 @@ class BotTUI:
                 del self.user_ignore_timers[username] # Expired
         return False
 
+    def set_mode(self, mode):
+        self.mode = mode
+        save_mode(mode) # Optional: persist mode if desired, or just keep runtime
+
     def generate_layout(self):
-        # Footer Content
-        # Show more targets, but still truncate if extremely long to avoid taking up whole screen
-        targets_list = self.targets
-        targets_str = ", ".join(targets_list)
-        footer_text = f"Targets: {targets_str} | !add, !remove, !ignore <user> n | [Press Ctrl+C to Stop]"
-        
-        # Calculate dynamic height for footer
-        # Width available for text inside panel (approx console width - 4 for borders/padding)
-        available_width = max(10, self.console.width - 4)
-        required_lines = math.ceil(len(footer_text) / available_width)
-        footer_height = required_lines + 2 # +2 for top/bottom borders
-        
         layout = Layout()
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main", ratio=1),
-            Layout(name="footer", size=footer_height)
+            Layout(name="footer", size=3) # Will be dynamic
         )
         layout["main"].split_row(
             Layout(name="left", ratio=1),
@@ -134,7 +126,8 @@ class BotTUI:
         
         # Header
         status_color = "red" if self.paused else "green"
-        header_text = f"🤖 Instagram Bot | User: {self.user_id} | Status: [{status_color}]{self.status_msg}[/{status_color}]"
+        mode_icon = "😈" if self.mode == "default" else ("😇" if self.mode == "polite" else "🤡")
+        header_text = f"🤖 Instagram Bot | User: {self.user_id} | Mode: {self.mode.upper()} {mode_icon} | Status: [{status_color}]{self.status_msg}[/{status_color}]"
         layout["header"].update(Panel(header_text, style="bold white on blue"))
         
         # Logs (Right)
@@ -152,7 +145,14 @@ class BotTUI:
             
         layout["left"].update(Panel(table, title="💬 Recent Threads", border_style="green"))
         
-        # Footer Update
+        # Footer
+        targets_list = self.targets
+        targets_str = ", ".join(targets_list)
+        footer_text = f"Targets: {targets_str} | !polite, !joke, !normal, !add/remove | [Ctrl+C to Stop]"
+        
+        available_width = max(10, self.console.width - 4)
+        required_lines = math.ceil(len(footer_text) / available_width)
+        layout["footer"].size = required_lines + 2
         layout["footer"].update(Panel(footer_text, style="white on black"))
         
         return layout
@@ -165,30 +165,24 @@ def log(message):
     if BOT_UI:
         BOT_UI.log(message)
     else:
-        # Fallback if UI not init
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] {message}")
 
 def human_like_delay(min_seconds=5, max_seconds=15):
-    """Sleeps for a random amount of time to simulate human thinking."""
+    """Sleeps for a random amount of time."""
     delay = random.uniform(min_seconds, max_seconds)
     log(f"Thinking... sleeping for {delay:.2f} seconds.")
-    # In TUI mode, we might want to update the UI while sleeping? 
-    # For simplicity, we just sleep, blocking the TUI update loop briefly unless we threaded it.
-    # But since we update TUI in the main loop, small sleeps are fine. 
-    # For better UX, we could chunk the sleep.
     time.sleep(delay)
 
 def typing_simulation_delay(text_length):
-    """Sleeps based on the length of the response to simulate typing."""
+    """Sleeps based on response length."""
     delay = text_length * random.uniform(0.1, 0.2)
-    # Cap the delay as requested (1-10 seconds)
     delay = max(1.0, min(delay, 10.0))
     log(f"Typing... sleeping for {delay:.2f} seconds.")
     time.sleep(delay)
 
 def login(cl):
-    """Handles login with session file or credentials."""
+    """Handles login."""
     if os.path.exists(SESSION_FILE):
         log("Session file found. Attempting to load session...")
         try:
@@ -211,23 +205,41 @@ def login(cl):
         return False
 
 def generate_response(prompt_input):
-    """Generates a response using Gemini."""
-    persona_instruction = (
-        "You are a creative, sarcastic, and 'kwan-teen' (กวนตีน) Thai friend. "
-        "Use Thai slang, be witty, and avoid repetitive answers. "
-        "Keep the response VERY SHORT, NOT EXCEEDING 1 SENTENCE. "
-        "Do not use profanity (คำหยาบ) unless the user uses it first."
-        "The user said: "
-    )
-    full_prompt = persona_instruction + prompt_input
+    """Generates a response using Gemini based on current mode."""
+    
+    current_mode = BOT_UI.mode if BOT_UI else "default"
+    
+    if current_mode == "polite":
+        persona_instruction = (
+            "You are a polite, respectful, and helpful Thai assistant. "
+            "Use formal/polite language (end with ครับ/ค่ะ when appropriate). "
+            "Be kind and avoid slang or rude words. "
+            "Keep the response VERY SHORT, NOT EXCEEDING 1 SENTENCE. "
+        )
+    elif current_mode == "joke":
+        # Specific instruction: Funny but NOT insulating/rude
+        persona_instruction = (
+            "You are a funny, cheerful Thai friend who loves telling jokes. "
+            "Make a joke or say something funny based on the input. "
+            "IMPORTANT: Be lighthearted and playful. "
+            "Do NOT be sarcastic, rude, insulting, or aggressive. "
+            "Do NOT use profanity. "
+            "Keep the response VERY SHORT, NOT EXCEEDING 1 SENTENCE. "
+        )
+    else: # Default (Kwan-teen)
+        persona_instruction = (
+            "You are a creative, sarcastic, and 'kwan-teen' (กวนตีน) Thai friend. "
+            "Use Thai slang, be witty, and avoid repetitive answers. "
+            "Keep the response VERY SHORT, NOT EXCEEDING 1 SENTENCE. "
+            "Do not use profanity (คำหยาบ) unless the user uses it first."
+        )
+
+    full_prompt = persona_instruction + "The user said: " + prompt_input
     
     try:
-        # Rotation models to avoid rate limits
         models_list = ['gemini-3-flash-preview', 'gemini-2.5-flash-lite-preview-09-2025']
         selected_model = random.choice(models_list)
         
-        # log(f"Using AI Model: {selected_model}") # Optional debug log
-
         response = client.models.generate_content(
             model=selected_model,
             contents=full_prompt
@@ -237,14 +249,10 @@ def generate_response(prompt_input):
         log(f"Gemini API Error: {e}")
         return "เออ เดี๋ยวมาตอบนะ (AI Error)"
 
-def run_bot(use_tui=False):
+def run_bot(use_tui=False, start_mode="default"):
     global BOT_UI
     BOT_UI = BotTUI(use_tui)
-    
-    # If TUI is on, we need a Live context. 
-    # But `login` might happen before.
-    # We'll use a wrapper generator logic or just handle TUI update manually inside loop if use_tui logic permits.
-    # Actually rich.Live is a context manager.
+    BOT_UI.mode = start_mode # Set initial mode
     
     if use_tui:
         with Live(BOT_UI.generate_layout(), refresh_per_second=4, screen=True) as live:
@@ -263,17 +271,15 @@ def _run_bot_logic(live_ctx):
     if BOT_UI: BOT_UI.user_id = my_pk
     
     log(f"Bot started. User ID: {my_pk} targets: {len(BOT_UI.targets)}")
-    log("Admin commands loaded.")
+    log(f"Initial Mode: {BOT_UI.mode}")
 
     is_paused = False
     ignore_until = None
 
     while True:
         try:
-            # Refresh TUI
             if live_ctx: live_ctx.update(BOT_UI.generate_layout())
 
-            # Check ignore timer
             if ignore_until and datetime.now() > ignore_until:
                 log("⏳ Ignore timer expired. Resuming bot...")
                 ignore_until = None
@@ -281,7 +287,6 @@ def _run_bot_logic(live_ctx):
 
             poll_interval = 10
             
-            # Update Status text
             status_text = "Running"
             if is_paused:
                 status_text = "⛔ PAUSED"
@@ -292,11 +297,9 @@ def _run_bot_logic(live_ctx):
             if BOT_UI: BOT_UI.set_status(status_text, is_paused, ignore_until)
             if live_ctx: live_ctx.update(BOT_UI.generate_layout())
             
-            # --- Check Direct Threads ---
             threads = cl.direct_threads(amount=20)
             log(f"--- Checking {len(threads)} recent threads ---")
             
-            # Build thread data for TUI
             tui_thread_list = []
 
             for thread in threads:
@@ -306,7 +309,6 @@ def _run_bot_logic(live_ctx):
                 sender_pk = str(last_msg.user_id)
                 message_text = last_msg.text if last_msg.item_type == 'text' else f"[{last_msg.item_type}]"
                 
-                # Identify Sender Username
                 sender_username = "Unknown"
                 for user in thread.users:
                     if str(user.pk) == sender_pk:
@@ -315,7 +317,6 @@ def _run_bot_logic(live_ctx):
                 if sender_pk == my_pk:
                     sender_username = "Me"
 
-                # Helper for logging
                 participants = [u.username for u in thread.users if str(u.pk) != my_pk]
                 participants_str = ", ".join(participants)
                 
@@ -323,7 +324,6 @@ def _run_bot_logic(live_ctx):
                 status_icon = "✅" if is_from_me else "📩"
                 log_status = "Read" if is_from_me else "UNREAD"
                 
-                # Add to TUI list
                 tui_thread_list.append({
                     "title": f"{thread.thread_title} [{participants_str}]",
                     "msg": f"{sender_username}: {message_text[:15]}...",
@@ -349,62 +349,69 @@ def _run_bot_logic(live_ctx):
                         
                     elif cmd == "!stop":
                         if not is_paused:
-                            log("⏸️ Admin sent !stop. Bot PAUSED.")
+                            log("⏸️ Admin sent stop. Bot PAUSED.")
                             is_paused = True
                             ignore_until = None
                             cl.direct_send("Bot Paused ⏸️", thread_ids=[thread.pk])
                             
                     elif cmd == "!start":
                         if is_paused:
-                            log("▶️ Admin sent !start. Bot RESUMED.")
+                            log("▶️ Admin sent start. Bot RESUMED.")
                             is_paused = False
                             ignore_until = None
                             cl.direct_send("Bot Resumed ▶️", thread_ids=[thread.pk])
-                            
-                    # !ignore <n> OR !ignore <username> <n>
-                    elif parts[0] == "!ignore":
-                        # Cases: 
-                        # 1. !ignore 10  (Global pause)
-                        # 2. !ignore username 10 (Target pause)
+                    
+                    # Mode Switch Commands
+                    elif cmd == "!polite":
+                        BOT_UI.mode = "polite"
+                        log("😇 Mode changed to POLITE")
+                        cl.direct_send("Mode: Polite 😇", thread_ids=[thread.pk])
                         
+                    elif cmd == "!joke":
+                        BOT_UI.mode = "joke"
+                        log("🤡 Mode changed to JOKE")
+                        cl.direct_send("Mode: Joke 🤡", thread_ids=[thread.pk])
+
+                    elif cmd in ["!normal", "!default", "!reset"]:
+                        BOT_UI.mode = "default"
+                        log("😈 Mode changed to DEFAULT")
+                        cl.direct_send("Mode: Default (Kwan-teen) 😈", thread_ids=[thread.pk])
+
+                    elif parts[0] == "!ignore":
                         try:
                             if len(parts) == 2:
-                                # Case 1: Global
                                 mins = float(parts[1])
                                 ignore_until = datetime.now() + timedelta(minutes=mins)
                                 is_paused = True
                                 log(f"⏳ Admin sent !ignore {mins}.")
                                 cl.direct_send(f"Sleeping for {mins} mins ⏳", thread_ids=[thread.pk])
-                                
                             elif len(parts) == 3:
-                                # Case 2: Target
                                 target_p = parts[1]
                                 mins = float(parts[2])
                                 BOT_UI.ignore_user(target_p, mins)
                                 log(f"⏳ Ignoring {target_p} for {mins} mins.")
                                 cl.direct_send(f"Ignoring {target_p} for {mins} mins ⏳", thread_ids=[thread.pk])
                         except ValueError:
-                            cl.direct_send("⚠️ Error: Check format !ignore [user] n", thread_ids=[thread.pk])
+                            cl.direct_send("⚠️ Error: Check format", thread_ids=[thread.pk])
 
                     elif parts[0] == "!add" and len(parts) > 1:
                         new_user = parts[1]
                         if BOT_UI.add_target(new_user):
-                            log(f"✅ Added {new_user} to targets.")
+                            log(f"✅ Added {new_user}.")
                             cl.direct_send(f"Added {new_user} ✅", thread_ids=[thread.pk])
                         else:
-                            cl.direct_send(f"{new_user} already in targets.", thread_ids=[thread.pk])
+                            cl.direct_send(f"{new_user} exists or failed.", thread_ids=[thread.pk])
 
                     elif parts[0] == "!remove" and len(parts) > 1:
                         rem_user = parts[1]
                         if BOT_UI.remove_target(rem_user):
-                            log(f"🗑️ Removed {rem_user} from targets.")
+                            log(f"🗑️ Removed {rem_user}.")
                             cl.direct_send(f"Removed {rem_user} 🗑️", thread_ids=[thread.pk])
                         else:
                             cl.direct_send(f"{rem_user} not found.", thread_ids=[thread.pk])
 
                 if is_paused: continue
 
-                # Target Check
                 is_target = False
                 target_username = ""
                 for user in thread.users:
@@ -414,14 +421,13 @@ def _run_bot_logic(live_ctx):
                         break
                 
                 if is_target:
-                    # Check per-user ignore
                     if BOT_UI.is_user_ignored(target_username):
                          log(f"Skipping {target_username} (Ignored).")
                          continue
                          
                     if not is_from_me:
                         log(f"✨ Target Match: {target_username}. Processing...")
-                        if live_ctx: live_ctx.update(BOT_UI.generate_layout()) # Update UI before delay
+                        if live_ctx: live_ctx.update(BOT_UI.generate_layout())
                         
                         human_like_delay(1, 5)
                         response_text = generate_response(message_text)
@@ -430,12 +436,10 @@ def _run_bot_logic(live_ctx):
                         cl.direct_send(response_text, thread_ids=[thread.pk])
                         log(f"Sent response to {target_username}.")
             
-            # Update UI with thread list
             if BOT_UI: BOT_UI.update_threads(tui_thread_list)
             if live_ctx: live_ctx.update(BOT_UI.generate_layout())
 
             log(f"Sleeping for {poll_interval}s...")
-            # Sleep in chunks to allow Ctrl+C
             for _ in range(poll_interval):
                 time.sleep(1)
                 
@@ -449,9 +453,17 @@ def _run_bot_logic(live_ctx):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-t", "--tui", action="store_true", help="Enable TUI mode")
+    parser.add_argument("-p", "--polite", action="store_true", help="Start in Polite Mode")
+    parser.add_argument("-j", "--joke", action="store_true", help="Start in Joke Mode (No insults)")
     args = parser.parse_args()
     
+    start_mode = "default"
+    if args.polite:
+        start_mode = "polite"
+    elif args.joke:
+        start_mode = "joke"
+    
     try:
-        run_bot(use_tui=args.tui)
+        run_bot(use_tui=args.tui, start_mode=start_mode)
     except KeyboardInterrupt:
         log("Bot stopped manually.")
