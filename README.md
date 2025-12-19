@@ -26,7 +26,7 @@ A production-grade, 24/7 Instagram DM Automation Bot that acts as a sarcastic, w
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/champyod/instagram-bot.git
     cd instagram-bot
     ```
 
