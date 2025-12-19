@@ -2,6 +2,7 @@ import time
 import random
 import os
 import sys
+import math
 import argparse
 from datetime import datetime, timedelta
 from google import genai
@@ -108,11 +109,23 @@ class BotTUI:
         return False
 
     def generate_layout(self):
+        # Footer Content
+        # Show more targets, but still truncate if extremely long to avoid taking up whole screen
+        targets_list = self.targets
+        targets_str = ", ".join(targets_list)
+        footer_text = f"Targets: {targets_str} | !add, !remove, !ignore <user> n | [Press Ctrl+C to Stop]"
+        
+        # Calculate dynamic height for footer
+        # Width available for text inside panel (approx console width - 4 for borders/padding)
+        available_width = max(10, self.console.width - 4)
+        required_lines = math.ceil(len(footer_text) / available_width)
+        footer_height = required_lines + 2 # +2 for top/bottom borders
+        
         layout = Layout()
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main", ratio=1),
-            Layout(name="footer", size=3)
+            Layout(name="footer", size=footer_height)
         )
         layout["main"].split_row(
             Layout(name="left", ratio=1),
@@ -139,9 +152,7 @@ class BotTUI:
             
         layout["left"].update(Panel(table, title="💬 Recent Threads", border_style="green"))
         
-        # Footer
-        targets_display = ', '.join(self.targets[:5]) + ('...' if len(self.targets) > 5 else '')
-        footer_text = f"Targets: {targets_display} | !add, !remove, !ignore <user> n | [Press Ctrl+C to Stop]"
+        # Footer Update
         layout["footer"].update(Panel(footer_text, style="white on black"))
         
         return layout
